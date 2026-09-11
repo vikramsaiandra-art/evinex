@@ -1,0 +1,20 @@
+@import "tailwindcss";
+
+/* Smooth native touch scrolling & prevent tap highlight box on mobile devices */
+* {
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Smooth scrolling */
+html {
+  scroll-behavior: smooth;
+}
+
+/* Hide scrollbar utility for mobile horizontal tabs & bars */
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}

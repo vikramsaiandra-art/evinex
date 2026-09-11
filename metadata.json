@@ -1,0 +1,7 @@
+{
+  "name": "EVINEX - Secure Digital Document Management System",
+  "description": "Enterprise digital document management and evidentiary integrity system with strict role-based access control, cryptographic verification, and tamper-proof audit trails.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
+
