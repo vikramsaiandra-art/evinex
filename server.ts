@@ -1,7 +1,6 @@
 import express, { Request, Response, NextFunction } from 'express';
 import path from 'path';
 import crypto from 'crypto';
-import { createServer as createViteServer } from 'vite';
 import { User, Role, Case, Document, EvidenceRecord, AuditLog } from './src/types.js';
 import {
   initDatabase,
@@ -656,6 +655,18 @@ async function verifyGoogleCredential(credential: string): Promise<GoogleIdentit
 // GET /api/config — exposes OAuth client id to the SPA
 app.get('/api/config', (_req: Request, res: Response) => {
   res.json({ googleClientId: GOOGLE_CLIENT_ID || null });
+});
+
+// GET /api/health — deployment platform health/uptime probe
+app.get('/api/health', (_req: Request, res: Response) => {
+  res.json({
+    status: 'ok',
+    service: 'EVINEX Security Server',
+    uptimeSeconds: Math.round(process.uptime()),
+    timestamp: new Date().toISOString(),
+    node: process.version,
+    env: process.env.NODE_ENV || 'development',
+  });
 });
 
 // POST /api/auth/google — Sign in / self-register via Gmail
@@ -1755,6 +1766,9 @@ app.post('/api/test/run-matrix', (req: Request, res: Response) => {
 
 async function startServer() {
   if (process.env.NODE_ENV !== 'production') {
+    // Dev mode: Vite dev middleware with HMR (loaded dynamically so the
+    // production bundle does not need vite in its runtime dependency graph)
+    const { createServer: createViteServer } = await import('vite');
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: 'spa',

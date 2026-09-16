@@ -1,0 +1,29 @@
+# ============================================================
+# EVINEX — Render Blueprint (deploy with "New +" > "Blueprint")
+# https://render.com/docs/blueprint-spec
+# ============================================================
+services:
+  - type: web
+    name: evinex
+    runtime: node
+    plan: free # upgrade to 'standard' to attach the persistent disk below
+    region: singapore # closest region to India on Render's free tier
+    buildCommand: npm ci && npm run build
+    startCommand: node dist/server.cjs
+    healthCheckPath: /api/health
+    autoDeploy: true # redeploy on every push to the connected GitHub repo
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: EVINEX_DB_PATH
+        value: /var/data/evinex.db # requires the disk below (paid plans)
+      - key: GOOGLE_CLIENT_ID
+        sync: false # set in the Render dashboard if you want real Google Sign-In
+      - key: GEMINI_API_KEY
+        sync: false # optional - unused by the app today
+    # NOTE: Render's free plan has no persistent disk. Attach one on a paid
+    # plan so SQLite survives redeploys; otherwise the DB re-seeds each deploy.
+    # disk:
+    #   name: evinex-data
+    #   mountPath: /var/data
+    #   sizeGB: 1

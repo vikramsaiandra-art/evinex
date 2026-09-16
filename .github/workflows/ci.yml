@@ -1,0 +1,38 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Type check
+        run: npx tsc --noEmit
+
+      - name: Build (frontend + server bundle)
+        run: npm run build
+
+      - name: Smoke test production server
+        run: |
+          NODE_ENV=production PORT=3000 node dist/server.cjs &
+          sleep 5
+          curl -fsS http://localhost:3000/api/health
+          echo
+          curl -fsS -X POST http://localhost:3000/api/auth/login \
+            -H 'Content-Type: application/json' \
+            -d '{"email":"admin@evinex.demo","password":"Evinex@Admin2026"}' \
+            | grep -o 'ADMIN'
