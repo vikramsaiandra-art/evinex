@@ -102,7 +102,19 @@ Multi-stage build → final image runs only Node 24 + production dependencies. *
 For the full working app (login, uploads, verification, audit), use Options A/B/C.
 
 
-### Option D — Any VPS (Ubuntu)
+### Option D — Netlify (static UI + hosted backend)
+
+⚠️ Netlify hosts static files only — the Express + SQLite backend cannot run there, which is why sign-ins fail on a plain Netlify deploy. To make logins work, deploy the **backend** separately (Option A on Render, or Option C on Railway) and point the **UI** at it:
+
+1. Deploy the backend first (Render Blueprint or Railway) and copy its public URL, e.g. `https://evinex.onrender.com`.
+2. In [Netlify](https://app.netlify.com) → **Add new site → Import an existing project** → select this GitHub repo. Netlify auto-reads [`netlify.toml`](netlify.toml) (build: `npx vite build`, publish: `dist`).
+3. **Crucial:** add the environment variable `VITE_API_BASE = https://<your-backend-url>` under **Site configuration → Environment variables**. (Vite inlines it at build time, so set it *before* the build and trigger a redeploy after changing it.)
+4. **Recommended (security):** on the backend host, set `ALLOWED_ORIGIN=https://<your-netlify-url>` so only your site may call the API.
+5. Redeploy. Logins, uploads and verification now work — the UI talks to your hosted backend over CORS (Bearer-token auth, no cookies, so cross-origin is safe).
+
+Alternatively, uncomment the `/api/*` proxy block in `netlify.toml` to reverse-proxy API calls to your backend instead of using `VITE_API_BASE`.
+
+### Option E — Any VPS (Ubuntu)
 
 ```bash
 # Install Node 24, then:

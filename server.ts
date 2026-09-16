@@ -20,6 +20,25 @@ interface AuthenticatedRequest extends Request {
 const app = express();
 const PORT = Number(process.env.PORT) || 3000;
 
+// ------------------------------------------------------------
+// CORS — allows a separately-hosted SPA (e.g. Netlify / GitHub
+// Pages) to call this API. Lock it down in production by setting
+// ALLOWED_ORIGIN to your site URL, e.g.
+//   ALLOWED_ORIGIN=https://evinex.netlify.app
+// Unset/`*` = allow any origin (fine for demo).
+// ------------------------------------------------------------
+const ALLOWED_ORIGIN = process.env.ALLOWED_ORIGIN || '*';
+app.use((req: Request, res: Response, next: NextFunction) => {
+  res.setHeader('Access-Control-Allow-Origin', ALLOWED_ORIGIN);
+  res.setHeader('Vary', 'Origin');
+  res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type,Authorization');
+  if (req.method === 'OPTIONS') {
+    return res.sendStatus(204);
+  }
+  next();
+});
+
 app.use(express.json({ limit: '10mb' }));
 
 // Helper: Hash password with PBKDF2

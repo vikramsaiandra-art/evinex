@@ -1,0 +1,32 @@
+# ============================================================
+# EVINEX — Netlify configuration (STATIC UI ONLY)
+#
+# ⚠️ Netlify hosts static files. The Express + SQLite backend is NOT
+# deployed here, so deploy the backend separately (Render/Railway —
+# see README) and point the UI at it via the VITE_API_BASE build
+# environment variable in Netlify:
+#     Site configuration → Build & deploy → Environment →
+#     Environment variables → VITE_API_BASE = https://<your-backend-url>
+#
+# Without VITE_API_BASE the site still builds and renders, but
+# sign-in/API features will fail (relative /api calls hit Netlify).
+# ============================================================
+
+[build]
+  command = "npx vite build"   # SPA only — the server bundle is not needed on Netlify
+  publish = "dist"
+
+# SPA fallback: serve index.html for unknown paths (routing is
+# client-side state, so this is just for direct hits/refreshes)
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
+
+# ALTERNATIVE (no code change needed): reverse-proxy /api to a hosted
+# backend instead of using VITE_API_BASE. Uncomment and set your URL:
+# [[redirects]]
+#   from = "/api/*"
+#   to = "https://YOUR-BACKEND-HOST/api/:splat"
+#   status = 200
+#   force = true
