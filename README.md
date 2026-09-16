@@ -83,10 +83,24 @@ docker run -d -p 3000:3000 -e NODE_ENV=production -e EVINEX_DB_PATH=/app/data/ev
 
 Multi-stage build → final image runs only Node 24 + production dependencies. **Mount a volume at `/app/data`** to keep the database.
 
-### Option C — Railway
+### Option C — Railway (uses `railway.json`, auto-detected)
 
-1. **New Project** → **Deploy from GitHub repo**.
-2. Set start command `node dist/server.cjs` (or use the Dockerfile), add variables `NODE_ENV=production`, and mount a volume at `/app/data`.
+1. In [Railway](https://railway.app) → **New Project** → **Deploy from GitHub repo** → select this repo.
+   Railway detects [`railway.json`](railway.json) and builds with the [`Dockerfile`](Dockerfile) (Node 24, health check `/api/health`) — no manual config needed.
+2. **Attach a volume for the database:** open the service → **Volumes** tab → create a volume with mount path **`/app/data`** so SQLite survives redeploys.
+3. Optional: add a `GOOGLE_CLIENT_ID` variable for real Google Sign-In.
+4. **Settings → Networking → Generate Domain** to get your public URL.
+
+### Option C2 — GitHub Pages (static UI preview only)
+
+⚠️ GitHub Pages hosts static files only — **the Express + SQLite backend is NOT deployed there**, so sign-in and API features are disabled in the preview (an on-page banner explains this). Useful for sharing the look & feel of the UI.
+
+1. In the repo: **Settings → Pages → Build and deployment → Source: GitHub Actions**.
+2. The [`gh-pages.yml`](.github/workflows/gh-pages.yml) workflow runs on every push to `main` (or trigger it manually via **Actions → Deploy SPA preview → Run workflow**).
+3. The preview appears at `https://vikramsaiandra-art.github.io/evinex/`.
+
+For the full working app (login, uploads, verification, audit), use Options A/B/C.
+
 
 ### Option D — Any VPS (Ubuntu)
 

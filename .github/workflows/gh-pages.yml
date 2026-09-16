@@ -1,0 +1,64 @@
+name: Deploy SPA preview to GitHub Pages
+
+# NOTE: GitHub Pages hosts STATIC files only. This workflow publishes the EVINEX
+# React UI as a public preview. The Express + SQLite backend is NOT deployed
+# here, so sign-in / API features are disabled in the preview (a banner says so).
+# For the full app, deploy the repo to Railway/Render (see README "Deployment").
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    if: github.repository == 'vikramsaiandra-art/evinex'
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      # Build ONLY the SPA, with the asset base rewritten to the repo sub-path
+      # (/evinex/). The full-stack `npm run build` (server bundle) is not needed
+      # for Pages and is left untouched for Railway/Render/Docker deployments.
+      - name: Build SPA for the /evinex/ sub-path
+        run: npx vite build --base=/evinex/
+
+      - name: Inject preview notice + SPA 404 fallback
+        run: |
+          node -e "
+            const fs = require('fs');
+            let html = fs.readFileSync('dist/index.html', 'utf8');
+            const banner = '<div style=\"position:fixed;bottom:0;left:0;right:0;z-index:99999;background:#b45309;color:#fff;font:600 13px system-ui,sans-serif;padding:10px 16px;text-align:center\">Static preview — the Express/SQLite backend is not available on GitHub Pages, so sign-in and API features are disabled. For the full app, deploy this repo to Railway or Render (see README).</div>';
+            html = html.replace('</body>', banner + '</body>');
+            fs.writeFileSync('dist/index.html', html);
+            fs.copyFileSync('dist/index.html', 'dist/404.html');
+          "
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+
+      - id: deployment
+        uses: actions/deploy-pages@v4
