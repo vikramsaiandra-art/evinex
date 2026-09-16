@@ -10,6 +10,8 @@ interface AuthContextType {
   accessDeniedMessage: string | null;
   sessionExpiredMessage: string | null;
   login: (email: string, password: string, rememberMe?: boolean) => Promise<boolean>;
+  adminLogin: (email: string, password: string, rememberMe?: boolean) => Promise<boolean>;
+  loginWithGoogle: (credential: string) => Promise<boolean>;
   logout: () => Promise<void>;
   clearAccessDenied: () => void;
   triggerAccessDenied: (attemptedPath: string) => void;
@@ -118,27 +120,84 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         return false;
       }
 
-      const receivedToken = data.token;
-      const authenticatedUser: User = data.user;
-
-      setToken(receivedToken);
-      setUser(authenticatedUser);
-
-      // Store in storage
-      if (rememberMe) {
-        localStorage.setItem(TOKEN_KEY, receivedToken);
-        localStorage.setItem(USER_KEY, JSON.stringify(authenticatedUser));
-      } else {
-        sessionStorage.setItem(TOKEN_KEY, receivedToken);
-        sessionStorage.setItem(USER_KEY, JSON.stringify(authenticatedUser));
-      }
-
-      return true;
+      return completeLogin(data.token, data.user, rememberMe);
     } catch (err) {
       console.error('Login request failure:', err);
       setLoginError('Invalid email or password.');
       return false;
     }
+  };
+
+  // Dedicated Administrator Portal login (POST /api/auth/admin-login)
+  const adminLogin = async (email: string, password: string, rememberMe = false): Promise<boolean> => {
+    setLoginError(null);
+    setAccessDeniedMessage(null);
+    setSessionExpiredMessage(null);
+
+    try {
+      const response = await fetch('/api/auth/admin-login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        setLoginError(data.error || 'Invalid administrator credentials.');
+        return false;
+      }
+
+      return completeLogin(data.token, data.user, rememberMe);
+    } catch (err) {
+      console.error('Admin portal login failure:', err);
+      setLoginError('Invalid administrator credentials.');
+      return false;
+    }
+  };
+
+  // Google Sign-In (Gmail) — credential is a Google ID token, or a
+  // demo:<email> token when no OAuth client is configured on the server.
+  const loginWithGoogle = async (credential: string): Promise<boolean> => {
+    setLoginError(null);
+    setAccessDeniedMessage(null);
+    setSessionExpiredMessage(null);
+
+    try {
+      const response = await fetch('/api/auth/google', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ credential }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        setLoginError(data.error || 'Google sign-in failed.');
+        return false;
+      }
+
+      return completeLogin(data.token, data.user, true);
+    } catch (err) {
+      console.error('Google sign-in failure:', err);
+      setLoginError('Google sign-in failed. Please try again.');
+      return false;
+    }
+  };
+
+  const completeLogin = (receivedToken: string, authenticatedUser: User, rememberMe: boolean): boolean => {
+    setToken(receivedToken);
+    setUser(authenticatedUser);
+
+    if (rememberMe) {
+      localStorage.setItem(TOKEN_KEY, receivedToken);
+      localStorage.setItem(USER_KEY, JSON.stringify(authenticatedUser));
+    } else {
+      sessionStorage.setItem(TOKEN_KEY, receivedToken);
+      sessionStorage.setItem(USER_KEY, JSON.stringify(authenticatedUser));
+    }
+
+    return true;
   };
 
   const logout = async () => {
@@ -185,6 +244,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         accessDeniedMessage,
         sessionExpiredMessage,
         login,
+        adminLogin,
+        loginWithGoogle,
         logout,
         clearAccessDenied,
         triggerAccessDenied,

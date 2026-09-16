@@ -66,7 +66,7 @@ export const Navbar: React.FC<NavbarProps> = ({ onOpenTestMatrix }) => {
   return (
     <header
       id="main-app-header"
-      className="sticky top-0 z-40 bg-[#070B16]/95 backdrop-blur-md border-b border-slate-800/80 text-slate-100 shadow-md"
+      className="sticky top-0 z-40 pt-safe bg-[#070B16]/95 backdrop-blur-md border-b border-slate-800/80 text-slate-100 shadow-md"
     >
       {/* Indian National Top Ribbon */}
       <IndianNationalRibbon />

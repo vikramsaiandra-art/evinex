@@ -251,7 +251,7 @@ export const UserDashboard: React.FC = () => {
   ];
 
   return (
-    <div id="user-dashboard-root" className="min-h-[calc(100vh-64px)] flex flex-col lg:flex-row bg-transparent text-slate-100">
+    <div id="user-dashboard-root" className="min-h-app flex flex-col lg:flex-row bg-transparent text-slate-100">
       {/* Mobile Top Navigation Bar (Visible on screens < lg) */}
       <div className="lg:hidden bg-[#0A0F1D] border-b border-slate-800 px-3 py-2.5 flex flex-col gap-2">
         <div className="flex items-center justify-between">

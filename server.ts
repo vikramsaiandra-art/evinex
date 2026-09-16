@@ -3,6 +3,15 @@ import path from 'path';
 import crypto from 'crypto';
 import { createServer as createViteServer } from 'vite';
 import { User, Role, Case, Document, EvidenceRecord, AuditLog } from './src/types.js';
+import {
+  initDatabase,
+  persistUser,
+  persistSession,
+  deleteSessionRow,
+  persistDocument,
+  persistEvidence,
+  persistAuditLog,
+} from './src/db.js';
 
 // Extend Express Request type for authenticated user
 interface AuthenticatedRequest extends Request {
@@ -127,6 +136,7 @@ function logAudit(
     ipAddress: (req.headers['x-forwarded-for'] as string) || req.socket.remoteAddress || '127.0.0.1',
   };
   auditLogsDb.unshift(logEntry); // Append to top of ledger
+  persistAuditLog(logEntry); // Persist to SQLite ledger
   return logEntry;
 }
 
@@ -417,6 +427,21 @@ const evidenceDb: EvidenceRecord[] = [
   },
 ];
 
+// -----------------------------------------------------------
+// PERSISTENT DATABASE (SQLite via node:sqlite, zero dependencies)
+// Creates data/evinex.db, seeds on first run, and loads stored
+// rows into the in-memory stores above so every restart keeps
+// all users, cases, documents, evidence, and audit history.
+// -----------------------------------------------------------
+initDatabase({
+  users: usersDb,
+  cases: casesDb,
+  documents: documentsDb,
+  evidence: evidenceDb,
+  auditLogs: auditLogsDb,
+  sessions: sessionsDb,
+});
+
 // Middleware: Authenticate Bearer Token
 function requireAuth(req: AuthenticatedRequest, res: Response, next: NextFunction) {
   const authHeader = req.headers.authorization;
@@ -430,6 +455,7 @@ function requireAuth(req: AuthenticatedRequest, res: Response, next: NextFunctio
   if (!session || Date.now() > session.expiresAt) {
     if (session) {
       sessionsDb.delete(token);
+      deleteSessionRow(token);
     }
     return res.status(401).json({ error: 'Your session has expired. Please log in again.' });
   }
@@ -438,6 +464,7 @@ function requireAuth(req: AuthenticatedRequest, res: Response, next: NextFunctio
   const freshUser = usersDb.find((u) => u.id === session.user.id);
   if (!freshUser || freshUser.status === 'DISABLED') {
     sessionsDb.delete(token);
+    deleteSessionRow(token);
     return res.status(403).json({ error: 'Account has been disabled by Administrator.' });
   }
 
@@ -536,7 +563,9 @@ app.post('/api/auth/login', (req: Request, res: Response) => {
   };
 
   user.lastLoginAt = sanitizedUser.lastLoginAt;
+  persistUser(user); // Persist lastLoginAt to SQLite
   sessionsDb.set(token, { user: sanitizedUser, expiresAt });
+  persistSession(token, user.id, expiresAt); // Persist session (survives restarts)
 
   logAudit(
     sanitizedUser,
@@ -564,6 +593,7 @@ app.post('/api/auth/logout', requireAuth, (req: AuthenticatedRequest, res: Respo
   if (authHeader && authHeader.startsWith('Bearer ')) {
     const token = authHeader.split(' ')[1];
     sessionsDb.delete(token);
+    deleteSessionRow(token);
   }
 
   if (req.user) {
@@ -571,6 +601,270 @@ app.post('/api/auth/logout', requireAuth, (req: AuthenticatedRequest, res: Respo
   }
 
   res.json({ success: true, message: 'Logged out successfully.' });
+});
+
+// -----------------------------------------------------------
+// GOOGLE SIGN-IN (Gmail) — Public user authentication
+// Google accounts authenticate as USER role only. Administrator
+// accounts must sign in through the dedicated Admin Portal.
+// -----------------------------------------------------------
+const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || '';
+
+interface GoogleIdentity {
+  email: string;
+  name: string;
+}
+
+async function verifyGoogleCredential(credential: string): Promise<GoogleIdentity> {
+  // Demo mode: no OAuth client configured on this server, accept demo tokens
+  if (!GOOGLE_CLIENT_ID) {
+    if (!credential.startsWith('demo:')) {
+      throw new Error('Google Sign-In is not configured on this server.');
+    }
+    const email = credential.slice(5).trim().toLowerCase();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      throw new Error('Invalid Gmail address.');
+    }
+    const name = email
+      .split('@')[0]
+      .replace(/[._-]+/g, ' ')
+      .replace(/\b\w/g, (c) => c.toUpperCase());
+    return { email, name };
+  }
+
+  // Production mode: verify the Google ID token with Google's tokeninfo API
+  const response = await fetch(
+    `https://oauth2.googleapis.com/tokeninfo?id_token=${encodeURIComponent(credential)}`
+  );
+  if (!response.ok) {
+    throw new Error('Google credential validation failed.');
+  }
+  const info = (await response.json()) as Record<string, unknown>;
+  if (info.aud !== GOOGLE_CLIENT_ID) {
+    throw new Error('Google credential audience mismatch.');
+  }
+  const emailVerified = info.email_verified === true || info.email_verified === 'true';
+  if (!emailVerified || typeof info.email !== 'string') {
+    throw new Error('Google account email is not verified.');
+  }
+  return {
+    email: info.email.toLowerCase(),
+    name: (info.name as string) || info.email.split('@')[0],
+  };
+}
+
+// GET /api/config — exposes OAuth client id to the SPA
+app.get('/api/config', (_req: Request, res: Response) => {
+  res.json({ googleClientId: GOOGLE_CLIENT_ID || null });
+});
+
+// POST /api/auth/google — Sign in / self-register via Gmail
+app.post('/api/auth/google', async (req: Request, res: Response) => {
+  try {
+    const { credential } = req.body || {};
+    if (!credential || typeof credential !== 'string') {
+      return res.status(400).json({ error: 'Missing Google credential.' });
+    }
+
+    const identity = await verifyGoogleCredential(credential);
+
+    // ADMIN accounts cannot sign in with Google — dedicated portal only
+    const existingAdmin = usersDb.find(
+      (u) => u.email.toLowerCase() === identity.email && u.role === 'ADMIN'
+    );
+    if (existingAdmin) {
+      logAudit(
+        existingAdmin,
+        'ACCESS_DENIED',
+        'DENIED',
+        `Google Sign-In blocked for ADMIN account ${existingAdmin.email}. Administrators must use the dedicated Admin Portal.`,
+        req
+      );
+      return res.status(403).json({
+        error:
+          'Administrator accounts must sign in through the dedicated Admin Portal with their password.',
+      });
+    }
+
+    let account = usersDb.find((u) => u.email.toLowerCase() === identity.email);
+
+    if (!account) {
+      // Self-registration: Google accounts become USER role
+      const salt = crypto.randomBytes(16).toString('hex');
+      const googleUser: UserRecord = {
+        id: `USR-USB-${Date.now().toString().slice(-4)}`,
+        name: identity.name,
+        email: identity.email,
+        role: 'USER',
+        designation: 'Google Authenticated Litigant',
+        courtOrDepartment: 'Self-Registered via Gmail',
+        badgeNumber: `GML-${Math.floor(1000 + Math.random() * 9000)}`,
+        status: 'ACTIVE',
+        createdAt: new Date().toISOString(),
+        // Random unusable password hash (Google accounts never use passwords)
+        passwordHash: hashPassword(crypto.randomBytes(32).toString('hex'), salt),
+        salt,
+      };
+      account = googleUser;
+      usersDb.push(account);
+      persistUser(account);
+      logAudit(
+        { id: account.id, name: account.name, role: account.role },
+        'USER_CREATED',
+        'SUCCESS',
+        `Self-registered via Google Sign-In (Gmail): ${identity.email}`,
+        req
+      );
+    }
+
+    if (account.status === 'DISABLED') {
+      logAudit(account, 'ACCESS_DENIED', 'DENIED', `Disabled Google-linked account attempted login: ${account.email}`, req);
+      return res.status(403).json({ error: 'Account has been disabled by Administrator.' });
+    }
+
+    const token = `evx_g_${crypto.randomBytes(32).toString('hex')}`;
+    const expiresAt = Date.now() + 8 * 60 * 60 * 1000; // 8 hours
+
+    const sanitizedUser: User = {
+      id: account.id,
+      name: account.name,
+      email: account.email,
+      role: account.role,
+      designation: account.designation,
+      courtOrDepartment: account.courtOrDepartment,
+      badgeNumber: account.badgeNumber,
+      status: account.status,
+      createdAt: account.createdAt,
+      lastLoginAt: new Date().toISOString(),
+    };
+
+    account.lastLoginAt = sanitizedUser.lastLoginAt;
+    persistUser(account);
+    sessionsDb.set(token, { user: sanitizedUser, expiresAt });
+    persistSession(token, account.id, expiresAt);
+
+    logAudit(
+      sanitizedUser,
+      'LOGIN_SUCCESS',
+      'SUCCESS',
+      `Authenticated via Google Sign-In (Gmail) as ${account.role}`,
+      req
+    );
+
+    return res.json({
+      token,
+      user: sanitizedUser,
+      expiresAt: new Date(expiresAt).toISOString(),
+      provider: 'google',
+    });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Google sign-in failed.';
+    logAudit(
+      { id: 'UNKNOWN', name: 'Unknown', role: 'UNKNOWN' },
+      'LOGIN_FAILED',
+      'FAILED',
+      `Google Sign-In failed: ${message}`,
+      req
+    );
+    return res.status(401).json({ error: message });
+  }
+});
+
+// POST /api/auth/admin-login — Separate secure portal for ADMIN accounts
+app.post('/api/auth/admin-login', (req: Request, res: Response) => {
+  const { email, password } = req.body;
+
+  if (!email || !password || typeof email !== 'string' || typeof password !== 'string') {
+    logAudit(
+      { id: 'UNKNOWN', name: 'Unknown', role: 'UNKNOWN' },
+      'LOGIN_FAILED',
+      'FAILED',
+      'Admin Portal: malformed credentials payload',
+      req
+    );
+    return res.status(401).json({ error: 'Invalid administrator credentials.' });
+  }
+
+  const normalizedEmail = email.trim().toLowerCase();
+  const user = usersDb.find((u) => u.email.toLowerCase() === normalizedEmail);
+
+  if (!user) {
+    // Constant-time simulation to prevent timing attacks
+    crypto.pbkdf2Sync(password, 'salt-dummy-constant', 10000, 64, 'sha512');
+    logAudit(
+      { id: 'UNKNOWN', name: normalizedEmail, role: 'UNKNOWN' },
+      'LOGIN_FAILED',
+      'FAILED',
+      `Admin Portal: unknown account attempted administrator sign-in (${normalizedEmail})`,
+      req
+    );
+    return res.status(401).json({ error: 'Invalid administrator credentials.' });
+  }
+
+  const computedHash = hashPassword(password, user.salt);
+  const isMatch = crypto.timingSafeEqual(
+    Buffer.from(computedHash, 'hex'),
+    Buffer.from(user.passwordHash, 'hex')
+  );
+
+  if (!isMatch) {
+    logAudit(user, 'LOGIN_FAILED', 'FAILED', `Admin Portal: incorrect password for ${user.email}`, req);
+    return res.status(401).json({ error: 'Invalid administrator credentials.' });
+  }
+
+  if (user.role !== 'ADMIN') {
+    logAudit(
+      user,
+      'ACCESS_DENIED',
+      'DENIED',
+      `Admin Portal access denied: non-administrator role ${user.role} attempted secure portal sign-in`,
+      req
+    );
+    return res.status(403).json({
+      error: 'This portal is restricted to Administrator accounts only. Use the standard sign-in.',
+    });
+  }
+
+  if (user.status === 'DISABLED') {
+    logAudit(user, 'ACCESS_DENIED', 'DENIED', `Admin Portal: disabled account ${user.email}`, req);
+    return res.status(403).json({ error: 'Account has been disabled by Administrator.' });
+  }
+
+  const token = `evx_a_${crypto.randomBytes(32).toString('hex')}`;
+  const expiresAt = Date.now() + 8 * 60 * 60 * 1000; // 8 hours
+
+  const sanitizedUser: User = {
+    id: user.id,
+    name: user.name,
+    email: user.email,
+    role: user.role,
+    designation: user.designation,
+    courtOrDepartment: user.courtOrDepartment,
+    badgeNumber: user.badgeNumber,
+    status: user.status,
+    createdAt: user.createdAt,
+    lastLoginAt: new Date().toISOString(),
+  };
+
+  user.lastLoginAt = sanitizedUser.lastLoginAt;
+  persistUser(user);
+  sessionsDb.set(token, { user: sanitizedUser, expiresAt });
+  persistSession(token, user.id, expiresAt);
+
+  logAudit(
+    sanitizedUser,
+    'LOGIN_SUCCESS',
+    'SUCCESS',
+    'Administrator authenticated via the dedicated Admin Portal',
+    req
+  );
+
+  return res.json({
+    token,
+    user: sanitizedUser,
+    expiresAt: new Date(expiresAt).toISOString(),
+    provider: 'admin-portal',
+  });
 });
 
 // -----------------------------------------------------------
@@ -616,6 +910,7 @@ app.post('/api/admin/users', requireAuth, requireRole('ADMIN'), (req: Authentica
   };
 
   usersDb.push(newUser);
+  persistUser(newUser); // Persist to SQLite
 
   logAudit(
     req.user!,
@@ -643,6 +938,7 @@ app.patch('/api/admin/users/:id/disable', requireAuth, requireRole('ADMIN'), (re
   }
 
   user.status = user.status === 'ACTIVE' ? 'DISABLED' : 'ACTIVE';
+  persistUser(user); // Persist status change to SQLite
 
   logAudit(
     req.user!,
@@ -657,6 +953,7 @@ app.patch('/api/admin/users/:id/disable', requireAuth, requireRole('ADMIN'), (re
     for (const [token, sess] of sessionsDb.entries()) {
       if (sess.user.id === user.id) {
         sessionsDb.delete(token);
+        deleteSessionRow(token);
       }
     }
   }
@@ -812,6 +1109,28 @@ app.post('/api/documents/upload', requireAuth, (req: AuthenticatedRequest, res: 
 
   // Calculate genuine SHA-256 hash
   const sha256Hash = computeSha256(fileContent);
+
+  // DUPLICATE PREVENTION: reject documents whose identical SHA-256 hash
+  // is already registered under the same case for this uploader.
+  const duplicate = documentsDb.find(
+    (d) => d.caseId === caseId && d.sha256Hash === sha256Hash && d.uploadedById === user.id
+  );
+  if (duplicate) {
+    logAudit(
+      user,
+      'DOCUMENT_UPLOAD',
+      'DENIED',
+      `Duplicate upload blocked for Case ${parentCase.cnrNumber}: identical SHA-256 already registered as ${duplicate.id}.`,
+      req,
+      caseId,
+      duplicate.id
+    );
+    return res.status(409).json({
+      error: `Duplicate document: this exact file is already registered under this case (ID: ${duplicate.id}, uploaded ${duplicate.uploadedDate}).`,
+      existingDocument: duplicate,
+    });
+  }
+
   const docId = `DOC-${new Date().getFullYear()}-${Date.now().toString().slice(-4)}`;
 
   const newDoc: Document = {
@@ -836,6 +1155,7 @@ app.post('/api/documents/upload', requireAuth, (req: AuthenticatedRequest, res: 
   };
 
   documentsDb.unshift(newDoc);
+  persistDocument(newDoc); // Persist to SQLite
 
   logAudit(
     user,
@@ -1047,6 +1367,8 @@ app.post('/api/evidence/register', requireAuth, requireRole('LEGAL_OFFICER', 'AD
 
   documentsDb.unshift(doc);
   evidenceDb.unshift(evidenceRecord);
+  persistDocument(doc); // Persist to SQLite
+  persistEvidence(evidenceRecord); // Persist to SQLite
 
   logAudit(
     user,
@@ -1140,6 +1462,7 @@ app.post('/api/evidence/:id/version', requireAuth, requireRole('LEGAL_OFFICER', 
     action: `Appended version ${nextVersionNum} (${reason}). Original evidence preserved intact.`,
     hashVerified: true,
   });
+  persistEvidence(evidence); // Persist new version & custody entry to SQLite
 
   logAudit(
     user,
@@ -1195,6 +1518,7 @@ app.post('/api/documents/:id/verify', requireAuth, (req: AuthenticatedRequest, r
   if (isMatch) {
     doc.status = 'VERIFIED';
     doc.bsaSection63Certified = true;
+    persistDocument(doc); // Persist verification result to SQLite
 
     logAudit(
       user,
@@ -1222,6 +1546,7 @@ app.post('/api/documents/:id/verify', requireAuth, (req: AuthenticatedRequest, r
     });
   } else {
     doc.status = 'INTEGRITY_WARNING';
+    persistDocument(doc); // Persist integrity warning to SQLite
 
     logAudit(
       user,

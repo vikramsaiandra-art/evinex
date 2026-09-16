@@ -22,7 +22,7 @@ export const AccessDeniedToast: React.FC<AccessDeniedToastProps> = ({ message, o
     <div
       id="access-denied-notification"
       role="alert"
-      className="fixed top-20 right-6 z-50 max-w-md w-full bg-[#1A0B0E] border-2 border-red-500/70 text-red-200 p-4 rounded-xl shadow-2xl shadow-red-950/80 backdrop-blur-md transition-all animate-bounce"
+      className="fixed top-20 right-3 left-3 sm:left-auto sm:right-6 z-50 max-w-md w-full bg-[#1A0B0E] border-2 border-red-500/70 text-red-200 p-4 rounded-xl shadow-2xl shadow-red-950/80 backdrop-blur-md transition-all animate-bounce"
     >
       <div className="flex items-start gap-3">
         <div className="p-2 rounded-lg bg-red-900/60 border border-red-500/50 text-red-300 shrink-0">

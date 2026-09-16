@@ -41,9 +41,9 @@ export const ThemeSelectorModal: React.FC<ThemeSelectorModalProps> = ({ isOpen, 
   return (
     <div
       id="theme-selector-modal"
-      className="fixed inset-0 z-50 flex items-center justify-center p-2.5 sm:p-4 bg-black/85 backdrop-blur-md"
+      className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-black/85 backdrop-blur-md"
     >
-      <div className="relative w-full max-w-2xl max-h-[92vh] flex flex-col rounded-2xl bg-[#090E1D] border border-slate-700 shadow-2xl text-slate-100 overflow-hidden">
+      <div className="relative w-full max-w-full sm:max-w-2xl max-h-modal flex flex-col rounded-t-3xl sm:rounded-2xl bg-[#090E1D] border border-slate-700 shadow-2xl text-slate-100 overflow-hidden overscroll-contain">
         {/* Header Tricolor Band */}
         <div className="h-1.5 w-full bg-gradient-to-r from-amber-500 via-white to-emerald-500"></div>
 

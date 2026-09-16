@@ -195,7 +195,7 @@ export const AdminDashboard: React.FC = () => {
   ];
 
   return (
-    <div id="admin-dashboard-root" className="min-h-[calc(100vh-64px)] flex flex-col lg:flex-row bg-transparent text-slate-100">
+    <div id="admin-dashboard-root" className="min-h-app flex flex-col lg:flex-row bg-transparent text-slate-100">
       {/* Mobile Top Navigation Bar (Screens < lg) */}
       <div className="lg:hidden bg-[#0A0F1D] border-b border-slate-800 px-3 py-2.5 flex flex-col gap-2">
         <div className="flex items-center justify-between">
@@ -604,7 +604,7 @@ export const AdminDashboard: React.FC = () => {
             </div>
 
             <div className="overflow-x-auto rounded-xl border border-slate-800 bg-[#0C1322]">
-              <table className="w-full text-left text-xs">
+              <table className="w-full min-w-[640px] text-left text-xs">
                 <thead>
                   <tr className="bg-slate-900/90 border-b border-slate-800 text-slate-400 uppercase tracking-wider text-[10px] font-bold">
                     <th className="py-3 px-4">User</th>
@@ -738,7 +738,7 @@ export const AdminDashboard: React.FC = () => {
         {activeTab === 'documents' && (
           <div className="space-y-4">
             <div className="overflow-x-auto rounded-xl border border-slate-800 bg-[#0C1322]">
-              <table className="w-full text-left text-xs">
+              <table className="w-full min-w-[640px] text-left text-xs">
                 <thead>
                   <tr className="bg-slate-900/90 border-b border-slate-800 text-slate-400 uppercase tracking-wider text-[10px] font-bold">
                     <th className="py-3 px-4">Document / File</th>
@@ -950,7 +950,7 @@ export const AdminDashboard: React.FC = () => {
             </div>
 
             <div className="overflow-x-auto rounded-xl border border-slate-800 bg-[#0C1322]">
-              <table className="w-full text-left text-xs">
+              <table className="w-full min-w-[640px] text-left text-xs">
                 <thead>
                   <tr className="bg-slate-900/90 border-b border-slate-800 text-slate-400 uppercase tracking-wider text-[10px] font-bold">
                     <th className="py-3 px-4">Event ID</th>
@@ -1090,8 +1090,8 @@ export const AdminDashboard: React.FC = () => {
 
       {/* CREATE USER MODAL */}
       {showCreateUserModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
-          <div className="w-full max-w-md rounded-2xl bg-[#0D1424] border border-slate-700 shadow-2xl p-6 text-slate-100">
+        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-black/80 backdrop-blur-sm">
+          <div className="w-full max-w-md max-h-modal overflow-y-auto overscroll-contain rounded-t-3xl sm:rounded-2xl bg-[#0D1424] border border-slate-700 shadow-2xl p-6 text-slate-100">
             <h3 className="text-base font-bold text-slate-100 mb-4">Register New System User</h3>
             <form onSubmit={handleCreateUser} className="space-y-3 text-xs">
               <div>

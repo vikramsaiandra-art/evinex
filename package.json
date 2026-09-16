@@ -9,6 +9,7 @@
     "start": "node dist/server.cjs",
     "preview": "vite preview",
     "clean": "rm -rf dist server.js",
+    "db:reset": "node -e \"require('fs').rmSync('data',{recursive:true,force:true});console.log('EVINEX database deleted. It will be re-seeded on next server start.')\"",
     "lint": "tsc --noEmit"
   },
   "dependencies": {

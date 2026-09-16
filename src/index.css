@@ -1,13 +1,63 @@
 @import "tailwindcss";
 
+/* ============================================================
+   MOBILE SUPPORT LAYER
+   ============================================================ */
+
+@theme {
+  /* Custom extra-small breakpoint used across the UI (Navbar role badges,
+     modals, login page). Without this, Tailwind v4 silently drops every
+     `xs:` class, permanently hiding elements marked `hidden xs:inline`. */
+  --breakpoint-xs: 30rem;
+}
+
+/* Dashboard shell height: 100vh fallback -> 100dvh (mobile browser toolbars
+   collapse/expand, so a static 100vh overflows on iOS Safari/Chrome). */
+@utility min-h-app {
+  min-height: calc(100vh - 64px);
+  min-height: calc(100dvh - 64px);
+}
+
+/* Modals: same dynamic-viewport treatment for max-height. */
+@utility max-h-modal {
+  max-height: 92vh;
+  max-height: 92dvh;
+}
+
+/* Notch / status-bar safe areas (viewport-fit=cover is set in index.html).
+   Only active inside standalone PWA mode; equals 0px in normal browsers. */
+@utility pt-safe {
+  padding-top: env(safe-area-inset-top, 0px);
+}
+
+@utility pb-safe {
+  padding-bottom: calc(0.75rem + env(safe-area-inset-bottom, 0px));
+}
+
 /* Smooth native touch scrolling & prevent tap highlight box on mobile devices */
 * {
   -webkit-tap-highlight-color: transparent;
 }
 
-/* Smooth scrolling */
+/* Smooth scrolling; stops pull-to-refresh from reloading the SPA mid-session */
 html {
   scroll-behavior: smooth;
+  overscroll-behavior-y: none;
+}
+
+/* Momentum scrolling for horizontal tables & tab bars on touch devices */
+.overflow-x-auto,
+.overflow-y-auto {
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Prevent iOS Safari auto-zoom when focusing inputs (needs font-size >= 16px) */
+@media (max-width: 640px) {
+  input,
+  select,
+  textarea {
+    font-size: 16px !important;
+  }
 }
 
 /* Hide scrollbar utility for mobile horizontal tabs & bars */

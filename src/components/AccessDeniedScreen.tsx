@@ -18,7 +18,7 @@ export const AccessDeniedScreen: React.FC<AccessDeniedScreenProps> = ({
   return (
     <div
       id="access-denied-screen"
-      className="min-h-[calc(100vh-64px)] flex items-center justify-center p-4 bg-[#070B16] text-slate-100"
+      className="min-h-app flex items-center justify-center p-4 bg-[#070B16] text-slate-100"
     >
       <div className="w-full max-w-lg rounded-2xl bg-[#0D1322] border-2 border-red-500/60 shadow-2xl shadow-red-950/50 p-5 sm:p-8 text-center space-y-5 sm:space-y-6 relative overflow-hidden">
         {/* Background glow */}

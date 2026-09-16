@@ -1,0 +1,24 @@
+{
+  "name": "EVINEX - Secure Digital Document Management System",
+  "short_name": "EVINEX",
+  "description": "Enterprise digital document management and evidentiary integrity system with strict role-based access control, cryptographic verification, and tamper-proof audit trails.",
+  "start_url": "/",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#080D1A",
+  "theme_color": "#080D1A",
+  "icons": [
+    {
+      "src": "/evinex_icon.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/evinex_icon.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ]
+}
