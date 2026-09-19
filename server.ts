@@ -1,9 +1,13 @@
 import express, { Request, Response, NextFunction } from 'express';
 import path from 'path';
+import fs from 'fs';
 import crypto from 'crypto';
 import { User, Role, Case, Document, EvidenceRecord, AuditLog } from './src/types.js';
 import {
   initDatabase,
+  listUsers,
+  upsertDemoUsers,
+  getDatabaseHealth,
   persistUser,
   persistSession,
   deleteSessionRow,
@@ -11,6 +15,7 @@ import {
   persistEvidence,
   persistAuditLog,
 } from './src/db.js';
+import { buildDemoUsers, hashPassword, type UserRecord } from './src/demoAccounts.js';
 
 // Extend Express Request type for authenticated user
 interface AuthenticatedRequest extends Request {
@@ -41,77 +46,16 @@ app.use((req: Request, res: Response, next: NextFunction) => {
 
 app.use(express.json({ limit: '10mb' }));
 
-// Helper: Hash password with PBKDF2
-function hashPassword(password: string, salt: string): string {
-  return crypto.pbkdf2Sync(password, salt, 10000, 64, 'sha512').toString('hex');
-}
-
-// User store with secure credentials
-interface UserRecord extends User {
-  passwordHash: string;
-  salt: string;
-}
-
-// Generate salts & hashes for demo accounts
-const adminSalt = crypto.randomBytes(16).toString('hex');
-const userSalt = crypto.randomBytes(16).toString('hex');
-const legalSalt = crypto.randomBytes(16).toString('hex');
-const advocateSalt = crypto.randomBytes(16).toString('hex');
-
-const usersDb: UserRecord[] = [
-  {
-    id: 'USR-ADM-001',
-    name: 'Suryakant Sharma',
-    email: 'admin@evinex.demo',
-    role: 'ADMIN',
-    designation: 'Principal Systems Registrar & Director',
-    courtOrDepartment: 'National Evidentiary Repository, New Delhi',
-    badgeNumber: 'EVX-NIC-9901',
-    status: 'ACTIVE',
-    createdAt: '2025-01-15T09:00:00Z',
-    passwordHash: hashPassword('Evinex@Admin2026', adminSalt),
-    salt: adminSalt,
-  },
-  {
-    id: 'USR-USR-002',
-    name: 'Ananya Deshmukh',
-    email: 'user@evinex.demo',
-    role: 'USER',
-    designation: 'Authorized Litigant / Petitioner Representative',
-    courtOrDepartment: 'Civil & Commercial Division, Delhi',
-    badgeNumber: 'LIT-DL-4482',
-    status: 'ACTIVE',
-    createdAt: '2025-02-10T11:30:00Z',
-    passwordHash: hashPassword('Evinex@User2026', userSalt),
-    salt: userSalt,
-  },
-  {
-    id: 'USR-LGL-003',
-    name: 'Vikramaditya Iyer',
-    email: 'legalofficer@evinex.demo',
-    role: 'LEGAL_OFFICER',
-    designation: 'Senior Legal Officer & Digital Evidence Custodian',
-    courtOrDepartment: 'High Court of Delhi - Digital Registry',
-    badgeNumber: 'JUD-DLHC-7104',
-    status: 'ACTIVE',
-    createdAt: '2025-01-20T14:15:00Z',
-    passwordHash: hashPassword('Evinex@Legal2026', legalSalt),
-    salt: legalSalt,
-  },
-  {
-    id: 'USR-ADV-004',
-    name: 'Meenakshi Sundaram',
-    email: 'advocate@evinex.demo',
-    role: 'ADVOCATE',
-    designation: 'Senior Counsel & Bar Council Member',
-    courtOrDepartment: 'Bar Council of Delhi (Enrollment: D/1842/2012)',
-    badgeNumber: 'BCD-ADV-1842',
-    status: 'ACTIVE',
-    createdAt: '2025-02-01T10:00:00Z',
-    passwordHash: hashPassword('Evinex@Advocate2026', advocateSalt),
-    salt: advocateSalt,
-  },
-];
+// ------------------------------------------------------------
+// DEMO ACCOUNTS & PASSWORD HASHING — single source of truth in
+// src/demoAccounts.ts (PBKDF2-HMAC-SHA512, 10k iterations, fresh
+// 128-bit random salt per account). buildDemoUsers() mints new
+// salts/hashes on every boot; the accounts are then ensured
+// idempotently right after initDatabase() below, so production
+// databases always have working demo credentials and never gain
+// duplicates.
+// ------------------------------------------------------------
+const usersDb: UserRecord[] = buildDemoUsers();
 
 // Active sessions: token -> { user, expiresAt }
 const sessionsDb = new Map<string, { user: User; expiresAt: number }>();
@@ -460,6 +404,31 @@ initDatabase({
   sessions: sessionsDb,
 });
 
+// ------------------------------------------------------------
+// PRODUCTION DEMO-ACCOUNT SEED (idempotent, runs on EVERY boot)
+// Guarantees the four demo accounts exist in the production
+// database even if the DB predates a credential/profile change,
+// was partially seeded, or was created by an older build.
+//  - Existing accounts are fixed/refreshed in place (never
+//    duplicated, matched case-insensitively by email).
+//  - Non-demo accounts are untouched.
+// The in-memory store is then refreshed from the database so the
+// API layer always authenticates against the persisted hashes.
+// ------------------------------------------------------------
+const demoSeedReport = upsertDemoUsers(buildDemoUsers());
+usersDb.length = 0;
+usersDb.push(...listUsers());
+if (demoSeedReport.created.length > 0 || demoSeedReport.updated.length > 0) {
+  console.log(
+    `[SEED] Demo accounts ensured: ${demoSeedReport.created.length} created, ` +
+      `${demoSeedReport.updated.length} verified/refreshed` +
+      (demoSeedReport.failed.length ? `, ${demoSeedReport.failed.length} FAILED` : '')
+  );
+}
+for (const failure of demoSeedReport.failed) {
+  console.error(`[SEED] FAILED to ensure demo account ${failure.email}: ${failure.error}`);
+}
+
 // Middleware: Authenticate Bearer Token
 function requireAuth(req: AuthenticatedRequest, res: Response, next: NextFunction) {
   const authHeader = req.headers.authorization;
@@ -601,8 +570,11 @@ app.post('/api/auth/login', (req: Request, res: Response) => {
 });
 
 // GET /api/auth/me
+// SECURITY: strip passwordHash/salt — the full UserRecord must never
+// reach the frontend (login/admin-login already sanitize; so must this).
 app.get('/api/auth/me', requireAuth, (req: AuthenticatedRequest, res: Response) => {
-  res.json({ user: req.user });
+  const { passwordHash: _passwordHash, salt: _salt, ...sanitizedUser } = req.user as UserRecord;
+  res.json({ user: sanitizedUser });
 });
 
 // POST /api/auth/logout
@@ -676,16 +648,44 @@ app.get('/api/config', (_req: Request, res: Response) => {
   res.json({ googleClientId: GOOGLE_CLIENT_ID || null });
 });
 
-// GET /api/health — deployment platform health/uptime probe
+// GET /api/health — deployment platform health/uptime probe.
+// Confirms the backend is running AND that the database is
+// reachable. No secrets, no user data (aggregate count only).
 app.get('/api/health', (_req: Request, res: Response) => {
-  res.json({
-    status: 'ok',
+  const dbHealth = getDatabaseHealth();
+  const body = {
+    status: dbHealth.ok ? 'ok' : 'degraded',
     service: 'EVINEX Security Server',
+    database: dbHealth.ok ? 'connected' : 'unavailable',
+    users: dbHealth.ok ? dbHealth.userCount : undefined,
     uptimeSeconds: Math.round(process.uptime()),
     timestamp: new Date().toISOString(),
     node: process.version,
     env: process.env.NODE_ENV || 'development',
-  });
+  };
+  if (!dbHealth.ok) {
+    return res.status(503).json(body);
+  }
+  res.json(body);
+});
+
+// GET /api/auth/health — authentication subsystem readiness.
+// Lets the frontend (and operators) distinguish "wrong password"
+// from "backend/DB unreachable" without exposing any secrets.
+app.get('/api/auth/health', (_req: Request, res: Response) => {
+  const dbHealth = getDatabaseHealth();
+  const body = {
+    status: dbHealth.ok ? 'ok' : 'degraded',
+    service: 'EVINEX Authentication',
+    database: dbHealth.ok ? 'connected' : 'unavailable',
+    authReady: dbHealth.ok,
+    users: dbHealth.ok ? dbHealth.userCount : undefined,
+    timestamp: new Date().toISOString(),
+  };
+  if (!dbHealth.ok) {
+    return res.status(503).json(body);
+  }
+  res.json(body);
 });
 
 // POST /api/auth/google — Sign in / self-register via Gmail
@@ -1797,7 +1797,19 @@ async function startServer() {
     const distPath = path.join(process.cwd(), 'dist');
     app.use(express.static(distPath));
     app.get('*', (req, res) => {
-      res.sendFile(path.join(distPath, 'index.html'));
+      // Unknown API routes must return a JSON 404 — never the SPA
+      // shell. Otherwise a missing/misconfigured API call silently
+      // "succeeds" with HTTP 200 + HTML and auth failures are hidden.
+      if (req.path === '/api' || req.path.startsWith('/api/')) {
+        return res.status(404).json({ error: 'API route not found.' });
+      }
+      const indexFile = path.join(distPath, 'index.html');
+      if (!fs.existsSync(indexFile)) {
+        return res
+          .status(503)
+          .send('EVINEX build output missing — run `npm run build` before starting the server.');
+      }
+      res.sendFile(indexFile);
     });
   }
 

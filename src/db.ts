@@ -353,6 +353,87 @@ export function persistAuditLog(entry: AuditLog): void {
   );
 }
 
+// -----------------------------------------------------------
+// DEMO-ACCOUNT UPSERT (idempotent production seeding)
+// Used by server boot and `npm run seed`. For every demo account:
+//  - if a user with the same email exists -> UPDATE/fix that row
+//    (fresh hash + salt, role, profile, force status ACTIVE)
+//  - otherwise -> INSERT it
+// Never creates duplicates (email is matched case-insensitively)
+// and never touches non-demo accounts.
+// -----------------------------------------------------------
+export interface DemoSeedReport {
+  created: string[];
+  updated: string[];
+  failed: { email: string; error: string }[];
+}
+
+export function upsertDemoUsers(demos: UserRecord[]): DemoSeedReport {
+  const report: DemoSeedReport = { created: [], updated: [], failed: [] };
+  for (const demo of demos) {
+    try {
+      const existing = db
+        .prepare('SELECT id FROM users WHERE lower(email) = lower(?)')
+        .get(demo.email) as { id: string } | undefined;
+
+      if (existing) {
+        // Fix/refresh the existing account in place — no duplicate row.
+        db.prepare(
+          `UPDATE users
+             SET name = ?, role = ?, designation = ?, court_or_department = ?,
+                 badge_number = ?, status = 'ACTIVE', password_hash = ?, salt = ?
+           WHERE id = ?`
+        ).run(
+          demo.name,
+          demo.role,
+          demo.designation,
+          demo.courtOrDepartment,
+          demo.badgeNumber,
+          demo.passwordHash,
+          demo.salt,
+          existing.id
+        );
+        report.updated.push(demo.email);
+      } else {
+        persistUser(demo);
+        report.created.push(demo.email);
+      }
+    } catch (err) {
+      report.failed.push({
+        email: demo.email,
+        error: (err as Error)?.message || String(err),
+      });
+    }
+  }
+  return report;
+}
+
+// Reload the full users table (sanity/refresh helper for callers
+// that keep an in-memory store, e.g. server.ts after an upsert).
+export function listUsers(): UserRecord[] {
+  return (
+    db.prepare('SELECT * FROM users ORDER BY created_at ASC').all() as Record<string, unknown>[]
+  ).map(rowToUser);
+}
+
+// -----------------------------------------------------------
+// HEALTH CHECK: verifies the SQLite database is actually
+// readable/writable. Reports counts only — never secrets.
+// -----------------------------------------------------------
+export function getDatabaseHealth(): { ok: boolean; userCount: number; error?: string } {
+  try {
+    const row = db.prepare('SELECT COUNT(*) AS c FROM users').get() as { c: number };
+    return { ok: true, userCount: row.c };
+  } catch (err) {
+    return {
+      ok: false,
+      userCount: 0,
+      error: (err as Error)?.message || 'database unavailable',
+    };
+  }
+}
+
+
 
 // -----------------------------------------------------------
 // INITIALIZATION: create schema, seed if empty, load rows into
@@ -434,24 +515,33 @@ export function initDatabase(stores: DbStores): void {
   createSchema(db);
   dedupeDatabase(db);
 
-  const isFirstRun =
-    (db.prepare('SELECT COUNT(*) AS c FROM users').get() as { c: number }).c === 0;
-
-  if (isFirstRun) {
-    console.log(`[DB] First run detected. Seeding EVINEX database at ${DB_PATH}...`);
-    db.exec('BEGIN');
-    try {
-      for (const u of stores.users) persistUser(u);
-      for (const c of stores.cases) persistCase(c);
-      for (const d of stores.documents) persistDocument(d);
-      for (const e of stores.evidence) persistEvidence(e);
-      for (const l of stores.auditLogs) persistAuditLog(l);
-      db.exec('COMMIT');
-      console.log('[DB] Seed complete: users, cases, documents, evidence, audit ledger.');
-    } catch (err) {
-      db.exec('ROLLBACK');
-      throw err;
-    }
+  // Seed any table that is still empty. Idempotent: safe on every
+  // boot and never overwrites or duplicates existing rows. Seeding
+  // each table independently also lets `npm run seed` create demo
+  // users on a fresh database while the server still seeds cases,
+  // documents, evidence and the audit ledger on its first boot.
+  const seededTables: string[] = [];
+  db.exec('BEGIN');
+  try {
+    const seedIfEmpty = <T>(table: string, rows: T[], persist: (row: T) => void): void => {
+      const { c } = db.prepare(`SELECT COUNT(*) AS c FROM ${table}`).get() as { c: number };
+      if (c === 0 && rows.length > 0) {
+        for (const row of rows) persist(row);
+        seededTables.push(table);
+      }
+    };
+    seedIfEmpty('users', stores.users, persistUser);
+    seedIfEmpty('cases', stores.cases, persistCase);
+    seedIfEmpty('documents', stores.documents, persistDocument);
+    seedIfEmpty('evidence', stores.evidence, persistEvidence);
+    seedIfEmpty('audit_logs', stores.auditLogs, persistAuditLog);
+    db.exec('COMMIT');
+  } catch (err) {
+    db.exec('ROLLBACK');
+    throw err;
+  }
+  if (seededTables.length > 0) {
+    console.log(`[DB] Seeded empty tables at ${DB_PATH}: ${seededTables.join(', ')}.`);
   }
 
   // Load persisted state back into the in-memory stores (source of truth: DB)

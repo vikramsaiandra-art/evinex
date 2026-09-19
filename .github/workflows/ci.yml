@@ -26,13 +26,26 @@ jobs:
       - name: Build (frontend + server bundle)
         run: npm run build
 
+      - name: Seed demo accounts (idempotent — run twice to prove no duplicates)
+        run: |
+          npm run seed
+          npm run seed
+
       - name: Smoke test production server
         run: |
           NODE_ENV=production PORT=3000 node dist/server.cjs &
           sleep 5
           curl -fsS http://localhost:3000/api/health
           echo
-          curl -fsS -X POST http://localhost:3000/api/auth/login \
-            -H 'Content-Type: application/json' \
-            -d '{"email":"admin@evinex.demo","password":"Evinex@Admin2026"}' \
-            | grep -o 'ADMIN'
+          curl -fsS http://localhost:3000/api/auth/health
+          echo
+          for creds in "admin@evinex.demo|Evinex@Admin2026|ADMIN" \
+                       "user@evinex.demo|Evinex@User2026|USER" \
+                       "legalofficer@evinex.demo|Evinex@Legal2026|LEGAL_OFFICER" \
+                       "advocate@evinex.demo|Evinex@Advocate2026|ADVOCATE"; do
+            IFS='|' read -r email password role <<< "$creds"
+            echo "Testing login: $email ($role)"
+            curl -fsS -X POST http://localhost:3000/api/auth/login \
+              -H 'Content-Type: application/json' \
+              -d "{\"email\":\"$email\",\"password\":\"$password\"}" | grep -o "$role"
+          done

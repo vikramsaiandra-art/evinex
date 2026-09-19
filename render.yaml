@@ -19,6 +19,8 @@ services:
         value: /var/data/evinex.db # requires the disk below (paid plans)
       - key: GOOGLE_CLIENT_ID
         sync: false # set in the Render dashboard if you want real Google Sign-In
+      - key: ALLOWED_ORIGIN
+        sync: false # set to your deployed SPA URL (e.g. https://evinex.netlify.app) when the UI is hosted separately; leave empty for same-origin deploys
       - key: GEMINI_API_KEY
         sync: false # optional - unused by the app today
     # NOTE: Render's free plan has no persistent disk. Attach one on a paid

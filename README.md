@@ -35,6 +35,7 @@ npm run dev          # development (Vite HMR) → http://localhost:3000
 
 ```bash
 npm run build        # builds frontend + server bundle into dist/
+npm run seed         # idempotently create/repair the 4 demo accounts in the database
 npm start            # NODE_ENV=production recommended → http://localhost:3000
 ```
 
@@ -50,6 +51,11 @@ npm start            # NODE_ENV=production recommended → http://localhost:3000
 | Advocate | User Sign In | `advocate@evinex.demo` | `Evinex@Advocate2026` |
 
 Or click **Sign in with Google** with any Gmail address (demo mode — see env vars below).
+
+> **Seeding:** the demo accounts are ensured idempotently on every server boot, and can be
+> (re)created/repaired in any database at any time with `npm run seed` (set `EVINEX_DB_PATH`
+> to target the production database file). Existing accounts are updated in place — never
+> duplicated. Passwords are always stored as PBKDF2-SHA512 hashes with per-user random salts.
 
 ## ⚙️ Environment Variables
 
@@ -130,9 +136,11 @@ Every push runs [.github/workflows/ci.yml](.github/workflows/ci.yml): type check
 
 ## 🧪 Verification & Health
 
-- `GET /api/health` — uptime probe for platforms
+- `GET /api/health` — uptime probe for platforms (also reports SQLite connectivity + user count)
+- `GET /api/auth/health` — authentication subsystem + database readiness (no secrets)
 - `POST /api/test/run-matrix` — built-in 14-test RBAC/workflow suite
 - `npm run lint` — TypeScript check
+- `npm run seed` — idempotently create/repair the 4 demo accounts in any database
 - `npm run db:reset` — wipe & re-seed the database
 
 ## 📁 Project Structure
