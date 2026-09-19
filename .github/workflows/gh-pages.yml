@@ -40,19 +40,33 @@ jobs:
       # Build ONLY the SPA, with the asset base rewritten to the repo sub-path
       # (/evinex/). The full-stack `npm run build` (server bundle) is not needed
       # for Pages and is left untouched for Railway/Render/Docker deployments.
+      #
+      # VITE_API_BASE (optional): set it as a repository *variable*
+      # (Settings → Secrets and variables → Actions → Variables) pointing at
+      # the deployed backend URL (e.g. https://evinex-xxxx.onrender.com).
+      # Vite inlines it at BUILD time. When unset the SPA keeps relative
+      # /api calls and sign-in stays disabled (banner below explains why).
       - name: Build SPA for the /evinex/ sub-path
         run: npx vite build --base=/evinex/
+        env:
+          VITE_API_BASE: ${{ vars.VITE_API_BASE }}
 
+      # The "backend unavailable" banner is only injected when no API base is
+      # configured — once VITE_API_BASE points at a live backend the preview
+      # is a fully working app and no notice is shown.
       - name: Inject preview notice + SPA 404 fallback
         run: |
           node -e "
             const fs = require('fs');
             let html = fs.readFileSync('dist/index.html', 'utf8');
-            const banner = '<div style=\"position:fixed;bottom:0;left:0;right:0;z-index:99999;background:#b45309;color:#fff;font:600 13px system-ui,sans-serif;padding:10px 16px;text-align:center\">Static preview — the Express/SQLite backend is not available on GitHub Pages, so sign-in and API features are disabled. For the full app, deploy this repo to Railway or Render (see README).</div>';
+            const apiBase = process.env.VITE_API_BASE;
+            const banner = apiBase ? '' : '<div style=\"position:fixed;bottom:0;left:0;right:0;z-index:99999;background:#b45309;color:#fff;font:600 13px system-ui,sans-serif;padding:10px 16px;text-align:center\">Static preview — the Express/SQLite backend is not available on GitHub Pages, so sign-in and API features are disabled. For the full app, deploy this repo to Railway or Render (see README).</div>';
             html = html.replace('</body>', banner + '</body>');
             fs.writeFileSync('dist/index.html', html);
             fs.copyFileSync('dist/index.html', 'dist/404.html');
           "
+        env:
+          VITE_API_BASE: ${{ vars.VITE_API_BASE }}
 
       - uses: actions/configure-pages@v5
 
