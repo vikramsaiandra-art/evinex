@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { User, Role } from '../types.js';
+import { apiUrl, describeApiTarget } from '../apiBase.js';
 
 interface AuthContextType {
   user: User | null;
@@ -47,13 +48,42 @@ function describeLoginFailure(
   if (!contentType.includes('application/json')) {
     // A non-JSON body (e.g. a static host's HTML 404 page) means the
     // request never reached the EVINEX API — a deployment/config issue.
-    return 'Authentication server unavailable. The API endpoint did not respond correctly — check the deployed API URL (VITE_API_BASE).';
+    if (response.status === 404) {
+      return `API endpoint not found (HTTP 404, non-JSON response from ${describeApiTarget()}). The deployed API URL (VITE_API_BASE) is wrong or the backend routes are missing — see the Console for details.`;
+    }
+    if (response.status >= 500) {
+      return `Backend error (HTTP ${response.status}, non-JSON response) from ${describeApiTarget()}. Check the deployed backend logs — see the Console for details.`;
+    }
+    return `Authentication server unavailable. The API endpoint did not respond correctly (HTTP ${response.status}, non-JSON from ${describeApiTarget()}) — check the deployed API URL (VITE_API_BASE).`;
   }
   return data?.error || credentialFallback;
 }
 
 function serverUnavailableMessage(): string {
   return 'Authentication server unavailable. Check your connection or the deployed API URL (VITE_API_BASE).';
+}
+
+// fetch() only rejects with TypeError on network-level failures —
+// either the backend is down/unreachable, or the response was blocked
+// by CORS. This keeps "wrong password" and "backend unreachable"
+// clearly separate for both users and deployers.
+function networkFailureMessage(err: unknown): string {
+  if (err instanceof TypeError) {
+    return `Cannot reach the authentication server at ${describeApiTarget()}. The backend may be down or blocking cross-origin (CORS) requests — see the Console for details.`;
+  }
+  return serverUnavailableMessage();
+}
+
+// Console-only diagnostic (never shown in the UI): status, content
+// type and the exact API target, so deployment issues are visible in
+// DevTools. Contains no secrets.
+function logFailedAuthRequest(action: string, response: Response): void {
+  // eslint-disable-next-line no-console
+  console.error(
+    `[EVINEX AUTH] ${action} → HTTP ${response.status} ` +
+      `(${response.headers.get('content-type') || 'no content-type'}) ` +
+      `from ${describeApiTarget()}`
+  );
 }
 
 async function parseJsonResponse(response: Response): Promise<LoginResponsePayload | null> {
@@ -158,6 +188,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const data = await parseJsonResponse(response);
 
       if (!response.ok) {
+        logFailedAuthRequest(`POST ${apiUrl('/api/auth/login')}`, response);
         setLoginError(describeLoginFailure(response, data, 'Invalid email or password.'));
         return false;
       }
@@ -170,8 +201,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       return completeLogin(data.token, data.user, rememberMe);
     } catch (err) {
-      console.error('Login request failure:', err);
-      setLoginError(serverUnavailableMessage());
+      console.error(`[EVINEX AUTH] POST ${apiUrl('/api/auth/login')} failed before a response was received:`, err);
+      setLoginError(networkFailureMessage(err));
       return false;
     }
   };
@@ -192,6 +223,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const data = await parseJsonResponse(response);
 
       if (!response.ok) {
+        logFailedAuthRequest(`POST ${apiUrl('/api/auth/admin-login')}`, response);
         setLoginError(describeLoginFailure(response, data, 'Invalid administrator credentials.'));
         return false;
       }
@@ -204,8 +236,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       return completeLogin(data.token, data.user, rememberMe);
     } catch (err) {
-      console.error('Admin portal login failure:', err);
-      setLoginError(serverUnavailableMessage());
+      console.error(`[EVINEX AUTH] POST ${apiUrl('/api/auth/admin-login')} failed before a response was received:`, err);
+      setLoginError(networkFailureMessage(err));
       return false;
     }
   };
@@ -227,6 +259,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const data = await parseJsonResponse(response);
 
       if (!response.ok) {
+        logFailedAuthRequest(`POST ${apiUrl('/api/auth/google')}`, response);
         setLoginError(describeLoginFailure(response, data, 'Google sign-in failed.'));
         return false;
       }
@@ -239,8 +272,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       return completeLogin(data.token, data.user, true);
     } catch (err) {
-      console.error('Google sign-in failure:', err);
-      setLoginError(serverUnavailableMessage());
+      console.error(`[EVINEX AUTH] POST ${apiUrl('/api/auth/google')} failed before a response was received:`, err);
+      setLoginError(networkFailureMessage(err));
       return false;
     }
   };

@@ -3,6 +3,7 @@ build/
 dist/
 coverage/
 data/
+.netlify-site-id
 .DS_Store
 *.log
 .env*
