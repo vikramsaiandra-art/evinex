@@ -661,7 +661,7 @@ export const LegalOfficerDashboard: React.FC = () => {
                     </span>
                   </div>
 
-                  <p className="text-xs text-slate-300">{evd.custodyNotes}</p>
+                  <p className="text-xs text-slate-300">{evd.chainOfCustody[0]?.action}</p>
 
                   <div className="p-2.5 rounded bg-black/50 font-mono text-[10px] text-amber-400/90 break-all">
                     SHA-256: {evd.sha256Hash}
@@ -744,7 +744,7 @@ export const LegalOfficerDashboard: React.FC = () => {
                   <div className="text-right">
                     {getStatusBadge(doc.status)}
                     <span className="text-[10px] font-mono text-slate-500 block mt-1">
-                      {new Date(doc.uploadedAt).toLocaleDateString()}
+                      {new Date(doc.uploadedDate).toLocaleDateString()}
                     </span>
                   </div>
                 </div>

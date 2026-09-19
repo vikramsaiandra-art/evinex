@@ -583,7 +583,7 @@ export const AdvocateDashboard: React.FC = () => {
                     </span>
                   </div>
 
-                  <p className="text-xs text-slate-300">{evd.custodyNotes}</p>
+                  <p className="text-xs text-slate-300">{evd.chainOfCustody[0]?.action}</p>
 
                   <div className="p-2.5 rounded bg-black/50 font-mono text-[10px] text-amber-400/90 break-all">
                     SHA-256: {evd.sha256Hash}

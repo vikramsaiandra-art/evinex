@@ -134,7 +134,7 @@ const AppContent: React.FC = () => {
         <IndianNationalBackground />
 
         <div className="relative z-10 flex flex-col flex-1 justify-between">
-          <LoginPage onOpenTestMatrix={() => setIsTestMatrixOpen(true)} />
+          <LoginPage onSuccessRedirect={handleNavigate} onOpenTestMatrix={() => setIsTestMatrixOpen(true)} />
         </div>
 
         <TestMatrixModal
